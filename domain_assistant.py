@@ -266,6 +266,58 @@ class OpenAIGenerator:
         return answer
 
 
+class GeminiGenerator:
+    def __init__(self, max_output_tokens: int = 300) -> None:
+        try:
+            from google import genai
+        except ImportError as exc:
+            raise RuntimeError(
+                "google-genai package is not installed. Install it with 'pip install google-genai'."
+            ) from exc
+
+        api_key = (
+            os.getenv("GEMINI_API_KEY", "").strip()
+            or os.getenv("GOOGLE_API_KEY", "").strip()
+        )
+        self.model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite").strip()
+        if not api_key:
+            raise RuntimeError("GEMINI_API_KEY or GOOGLE_API_KEY is missing from .env")
+        if not self.model:
+            raise RuntimeError("GEMINI_MODEL is missing from .env")
+        self.client = genai.Client(api_key=api_key)
+        self.max_output_tokens = max_output_tokens
+
+    def generate(self, prompt: str) -> str:
+        response = self.client.models.generate_content(
+            model=self.model,
+            contents=prompt,
+        )
+        answer = response.text.strip() if response.text else ""
+        if not answer:
+            raise RuntimeError("Gemini returned an empty answer")
+        return answer
+
+
+def create_default_generator(max_output_tokens: int = 300) -> TextGenerator:
+    """Create a generator dynamically based on environment variables."""
+    provider = os.getenv("LLM_PROVIDER", "").strip().lower()
+    gemini_key = os.getenv("GEMINI_API_KEY", "").strip() or os.getenv("GOOGLE_API_KEY", "").strip()
+    openai_key = os.getenv("OPENAI_API_KEY", "").strip()
+
+    if provider == "gemini":
+        return GeminiGenerator(max_output_tokens=max_output_tokens)
+    elif provider == "openai":
+        return OpenAIGenerator(max_output_tokens=max_output_tokens)
+    elif gemini_key and not openai_key:
+        return GeminiGenerator(max_output_tokens=max_output_tokens)
+    elif openai_key:
+        return OpenAIGenerator(max_output_tokens=max_output_tokens)
+    elif gemini_key:
+        return GeminiGenerator(max_output_tokens=max_output_tokens)
+    else:
+        return OpenAIGenerator(max_output_tokens=max_output_tokens)
+
+
 @dataclass(frozen=True)
 class DomainResponse:
     question: str
@@ -299,7 +351,7 @@ class DomainAssistant:
         return cls(
             corpus_id,
             BM25Retriever(chunks),
-            generator if generator is not None else OpenAIGenerator(),
+            generator if generator is not None else create_default_generator(),
             top_k,
         )
 
